@@ -18,6 +18,9 @@ type GeneratorOptions struct {
 
 	// Immutable if true add to all generated resources.
 	Immutable bool `json:"immutable,omitempty" yaml:"immutable,omitempty"`
+
+	// DataTypeMapping holds mapping between data keys and their string-represented data types
+	DataTypeMapping map[string]string `json:"dataTypeMapping,omitempty" yaml:"dataTypeMapping,omitempty"`
 }
 
 // MergeGlobalOptionsIntoLocal merges two instances of GeneratorOptions.
@@ -48,6 +51,7 @@ func MergeGlobalOptionsIntoLocal(
 	if globalOpts.Immutable {
 		localOpts.Immutable = true
 	}
+
 	return localOpts
 }
 
