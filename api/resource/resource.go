@@ -8,6 +8,7 @@ import (
 	"log"
 	"strings"
 
+	jsonpatch "github.com/evanphx/json-patch"
 	"sigs.k8s.io/kustomize/api/filters/patchstrategicmerge"
 	"sigs.k8s.io/kustomize/api/ifc"
 	"sigs.k8s.io/kustomize/api/internal/utils"
@@ -37,6 +38,7 @@ var BuildAnnotations = []string{
 	utils.BuildAnnotationsRefBy,
 	utils.BuildAnnotationsGenBehavior,
 	utils.BuildAnnotationsGenAddHashSuffix,
+	utils.BuildAnnotationsGenDataTypeMapping,
 
 	kioutil.PathAnnotation,
 	kioutil.IndexAnnotation,
@@ -183,6 +185,12 @@ func (r *Resource) copyKustomizeSpecificFields(other *Resource) {
 }
 
 func (r *Resource) MergeDataMapFrom(o *Resource) {
+	annotations := r.GetAnnotations()
+	if _, ok := annotations[utils.BuildAnnotationsGenDataTypeMapping]; ok {
+		r.SetDataMap(mergeStringMapsWithMapping(r.DataTypeMapping(), o.GetDataMap(), r.GetDataMap()))
+		return
+	}
+
 	r.SetDataMap(mergeStringMaps(o.GetDataMap(), r.GetDataMap()))
 }
 
@@ -377,6 +385,36 @@ func (r *Resource) MustYaml() string {
 	return string(yml)
 }
 
+// DataFormats returns the behavior for the resource.
+func (r *Resource) DataTypeMapping() map[string]string {
+	annotations := r.GetAnnotations()
+	if v, ok := annotations[utils.BuildAnnotationsGenDataTypeMapping]; ok {
+		mapping := map[string]string{}
+		for _, s := range strings.Split(v, ",") {
+			key := strings.Split(s, "=")[0]
+			val := strings.Split(s, "=")[1]
+
+			mapping[key] = val
+		}
+		return mapping
+	}
+	return map[string]string{}
+}
+
+func (r *Resource) SetDataTypeMapping(dataFormats map[string]string) {
+	annotations := r.GetAnnotations()
+
+	mappings := []string{}
+	for k, v := range dataFormats {
+		mappings = append(mappings, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	annotations[utils.BuildAnnotationsGenDataTypeMapping] = strings.Join(mappings, ",")
+	if err := r.SetAnnotations(annotations); err != nil {
+		panic(err)
+	}
+}
+
 // Behavior returns the behavior for the resource.
 func (r *Resource) Behavior() types.GenerationBehavior {
 	annotations := r.GetAnnotations()
@@ -514,6 +552,66 @@ func mergeStringMaps(maps ...map[string]string) map[string]string {
 		}
 	}
 	return result
+}
+
+func mergeStringMapsWithMapping(mapping map[string]string, maps ...map[string]string) map[string]string {
+	result := map[string]string{}
+	for _, m := range maps {
+		for key, value := range m {
+			var toset string
+
+			switch mapping[key] {
+			case "yaml":
+				toset = getValueYAML(result[key], m[key])
+			case "json":
+				//to do getValueJSON(result[key], m[key])
+				toset = value
+			default:
+				toset = value
+			}
+
+			result[key] = toset
+		}
+	}
+	return result
+}
+
+// getValueYAML tries to merge new value into an existing value.
+// In case of any problems in the process it falls back to the
+// typical `merge` behavior returning the target value.
+func getValueYAML(source, target string) string {
+	if source == "" {
+		return target
+	}
+
+	var res interface{}
+	if err := yaml.Unmarshal([]byte(source), &res); err != nil {
+		return target
+	}
+	if err := yaml.Unmarshal([]byte(target), &res); err != nil {
+		return target
+	}
+
+	sourceJson, err := yaml.YAMLToJSON([]byte(source))
+	if err != nil {
+		return target
+	}
+	targetJson, err := yaml.YAMLToJSON([]byte(target))
+	if err != nil {
+		return target
+	}
+
+	valueJson, err := jsonpatch.MergePatch(sourceJson, targetJson)
+	if err != nil {
+		return target
+	}
+
+	valueYaml, err := yaml.JSONToYAML(valueJson)
+	if err != nil {
+		return target
+	}
+
+	return string(valueYaml)
 }
 
 func mergeStringMapsWithBuildAnnotations(maps ...map[string]string) map[string]string {

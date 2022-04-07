@@ -77,6 +77,10 @@ func (rf *Factory) makeOne(rn *yaml.RNode, o *types.GeneratorArgs) *Resource {
 		if o.Options == nil || !o.Options.DisableNameSuffixHash {
 			resource.EnableHashSuffix()
 		}
+
+		if o.Options != nil && o.Options.DataTypeMapping != nil {
+			resource.SetDataTypeMapping(o.Options.DataTypeMapping)
+		}
 		resource.SetBehavior(types.NewGenerationBehavior(o.Behavior))
 	}
 
